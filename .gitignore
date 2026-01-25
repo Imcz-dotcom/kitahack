@@ -46,11 +46,23 @@ app.*.map.json
 
 # Virtual environment
 venv/
-
-# Data & models
-data/
-models/
+ml/venv/
+env/
+ENV/
 
 # Python cache
 __pycache__/
 *.pyc
+
+# Data & models
+data/
+models/
+*.npy
+*.keras
+*.h5
+*.task
+
+# ML specific
+ml/data/
+ml/models/
+ml/hand_landmarker.task
