@@ -11,9 +11,9 @@ import os
 # CONFIG
 # =========================
 MODEL_PATH = "models/hand_sign_model.keras"
-CLASSES = ["help", "cannot", "speak"]
+CLASSES = ["help", "cannot", "speak", "hello"]
 EXPECTED_LEN = 126
-HAND_LANDMARKER_MODEL = "hand_landmarker.task"
+HAND_LANDMARKER_MODEL = "models/hand_landmarker.task"
 # =========================
 
 # Download MediaPipe hand landmarker model if not exists
