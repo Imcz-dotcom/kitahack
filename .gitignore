@@ -54,15 +54,10 @@ ENV/
 __pycache__/
 *.pyc
 
-# Data & models
-data/
-models/
+# ML artifacts (generated / local)
+ml/data/
+ml/models/
 *.npy
 *.keras
 *.h5
 *.task
-
-# ML specific
-ml/data/
-ml/models/
-ml/hand_landmarker.task
