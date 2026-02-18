@@ -25,13 +25,13 @@ MODEL = None
 def _load_model() -> tf.keras.Model | None:
     """Load the trained model from disk, if available."""
     if not MODEL_PATH.exists():
-        print(f"⚠️ Model file not found: {MODEL_PATH}")
+        print(f"?? Model file not found: {MODEL_PATH}")
         print("Run training first: python ml/src/train/train_model.py")
         return None
 
     loaded_model = tf.keras.models.load_model(MODEL_PATH)
-    print(f"✅ Model loaded from: {MODEL_PATH}")
-    print(f"📋 Classes: {CLASSES}")
+    print(f"? Model loaded from: {MODEL_PATH}")
+    print(f"?? Classes: {CLASSES}")
     return loaded_model
 
 
@@ -47,7 +47,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle POST prediction requests and return model prediction."""
-        if self.path not in ("/endpoint", "/predict"):
+        if self.path != "/predict":
             self._send_json(404, {"error": "Not Found"})
             return
 
@@ -134,5 +134,5 @@ if __name__ == "__main__":
     MODEL = _load_model()
     server = HTTPServer((HOST, PORT), SimpleHandler)
     print(f"Server running at http://{HOST}:{PORT}")
-    print("POST to /predict (or /endpoint) with {\"landmarks\": [...]} or GET /health")
+    print('POST to /predict with {"landmarks": [...]} or GET /health')
     server.serve_forever()

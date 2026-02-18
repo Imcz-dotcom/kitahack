@@ -6,14 +6,10 @@ from urllib import request, error
 
 import cv2
 import mediapipe as mp
-import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-SERVER_URLS = [
-    "http://127.0.0.1:8000/predict",
-    "http://127.0.0.1:8000/endpoint",  # fallback for older server version
-]
+SERVER_URL = "http://127.0.0.1:8000/predict"
 HAND_LANDMARKER_MODEL = "ml/models/hand_landmarker.task"
 REQUEST_TIMEOUT_SEC = 10.0
 REQUEST_INTERVAL_SEC = 0.25
@@ -23,41 +19,31 @@ def call_predict(landmarks: list[float]) -> tuple[str, float, str | None]:
     """Send landmarks to server and return (label, confidence, optional_error)."""
     payload = {"landmarks": landmarks}
 
-    last_error = "Unknown error"
-    for server_url in SERVER_URLS:
-        req = request.Request(
-            server_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+    req = request.Request(
+        SERVER_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
 
+    try:
+        with request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as response:
+            body = json.loads(response.read().decode("utf-8"))
+            label = str(body.get("label", "unknown"))
+            confidence = float(body.get("confidence", 0.0))
+            return label, confidence, None
+    except error.HTTPError as exc:
+        detail = "http_error"
         try:
-            with request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as response:
-                body = json.loads(response.read().decode("utf-8"))
-                label = str(body.get("label", "unknown"))
-                confidence = float(body.get("confidence", 0.0))
-                return label, confidence, None
-        except error.HTTPError as exc:
-            detail = "http_error"
-            try:
-                error_body = json.loads(exc.read().decode("utf-8"))
-                detail = str(error_body.get("error", detail))
-            except (ValueError, json.JSONDecodeError):
-                pass
-
-            # If endpoint path not found, try the next URL.
-            if exc.code == 404:
-                last_error = f"{server_url} -> HTTP 404"
-                continue
-
-            return "server_error", 0.0, f"HTTP {exc.code}: {detail}"
-        except (error.URLError, TimeoutError) as exc:
-            return "server_error", 0.0, f"Network error: {exc.reason if hasattr(exc, 'reason') else str(exc)}"
-        except (ValueError, json.JSONDecodeError) as exc:
-            return "server_error", 0.0, f"Parse error: {exc}"
-
-    return "server_error", 0.0, last_error
+            error_body = json.loads(exc.read().decode("utf-8"))
+            detail = str(error_body.get("error", detail))
+        except (ValueError, json.JSONDecodeError):
+            pass
+        return "server_error", 0.0, f"HTTP {exc.code}: {detail}"
+    except (error.URLError, TimeoutError) as exc:
+        return "server_error", 0.0, f"Network error: {exc.reason if hasattr(exc, 'reason') else str(exc)}"
+    except (ValueError, json.JSONDecodeError) as exc:
+        return "server_error", 0.0, f"Parse error: {exc}"
 
 
 def check_server_health() -> None:
