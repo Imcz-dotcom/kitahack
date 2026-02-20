@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Service account for firebase database
+**/serviceAccount.json
+
+node_modules/
