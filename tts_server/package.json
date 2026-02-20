@@ -1,0 +1,23 @@
+{
+  "name": "tts_server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@google-cloud/text-to-speech": "^6.4.0",
+    "axios": "^1.13.5",
+    "body-parser": "^2.2.2",
+    "express": "^5.2.1",
+    "firebase-admin": "^13.6.1",
+    "fs": "^0.0.1-security",
+    "uuid": "^13.0.0"
+  }
+}
