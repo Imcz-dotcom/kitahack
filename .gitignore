@@ -49,3 +49,6 @@ app.*.map.json
 
 node_modules/
 .env
+
+# Temporary files of audio generation
+temp/
