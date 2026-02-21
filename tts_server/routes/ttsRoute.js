@@ -8,7 +8,6 @@ const router = express.Router()
 // Importing service functions for text-to-speech generation, audio uploading, metadata saving, and sending callbacks.
 const { generateSpeech } = require("../services/ttsService")
 const { uploadAudio, saveMetadata } = require("../services/firebaseService")
-const { sendCallback } = require("../services/callbackService")
 
 // Defining a POST route at "/generate-audio" that will handle incoming requests to generate audio from text.
 router.post("/generate-audio", async (req, res) => {
@@ -26,9 +25,6 @@ router.post("/generate-audio", async (req, res) => {
 
     // Save metadata, no return value
     await saveMetadata({ text, audioUrl, userId })
-
-    // Send URL to external endpoint
-    await sendCallback(audioUrl)
 
     res.json({ success: true, audioUrl })
 
