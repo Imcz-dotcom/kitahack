@@ -10,9 +10,11 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 SERVER_URL = "http://127.0.0.1:8000/predict"
+RECOGNIZED_SIGN_URL = "http://127.0.0.1:8000/recognizedSign"
 HAND_LANDMARKER_MODEL = "ml/models/hand_landmarker.task"
 REQUEST_TIMEOUT_SEC = 10.0
 REQUEST_INTERVAL_SEC = 0.25
+POST_CONFIDENCE_THRESHOLD = 0.95
 
 
 def call_predict(landmarks: list[float]) -> tuple[str, float, str | None]:
@@ -44,6 +46,34 @@ def call_predict(landmarks: list[float]) -> tuple[str, float, str | None]:
         return "server_error", 0.0, f"Network error: {exc.reason if hasattr(exc, 'reason') else str(exc)}"
     except (ValueError, json.JSONDecodeError) as exc:
         return "server_error", 0.0, f"Parse error: {exc}"
+
+
+def post_recognized_sign(recognized_sign: str) -> str | None:
+    """Send recognized hand-sign text to server, return optional error message."""
+    payload = {"recognizedSign": recognized_sign}
+
+    req = request.Request(
+        RECOGNIZED_SIGN_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC):
+            return None
+    except error.HTTPError as exc:
+        detail = "http_error"
+        try:
+            error_body = json.loads(exc.read().decode("utf-8"))
+            detail = str(error_body.get("error", detail))
+        except (ValueError, json.JSONDecodeError):
+            pass
+        return f"HTTP {exc.code}: {detail}"
+    except (error.URLError, TimeoutError) as exc:
+        return f"Network error: {exc.reason if hasattr(exc, 'reason') else str(exc)}"
+    except (ValueError, json.JSONDecodeError) as exc:
+        return f"Parse error: {exc}"
 
 
 def check_server_health() -> None:
@@ -81,6 +111,7 @@ def main() -> None:
     last_label = "waiting"
     last_confidence = 0.0
     last_error: str | None = None
+    last_posted_label = ""
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -114,6 +145,20 @@ def main() -> None:
                 if now - last_request_time >= REQUEST_INTERVAL_SEC:
                     last_label, last_confidence, last_error = call_predict(landmarks)
                     last_request_time = now
+
+                    if (
+                        last_error is None
+                        and last_label not in ("", "unknown", "server_error")
+                        and last_confidence >= POST_CONFIDENCE_THRESHOLD
+                        and last_label != last_posted_label
+                    ):
+                        post_error = post_recognized_sign(last_label)
+                        if post_error:
+                            last_error = f"Text post failed: {post_error}"
+                            print(f"[POST FAILED] label={last_label} confidence={last_confidence * 100:.1f}% error={post_error}")
+                        else:
+                            last_posted_label = last_label
+                            print(f"[POST OK] label={last_label} confidence={last_confidence * 100:.1f}%")
 
                 prediction_text = f"{last_label.upper()} ({last_confidence * 100:.1f}%)"
 

@@ -17,9 +17,11 @@ PORT = 8000
 CLASSES = ["help", "cannot", "speak", "hello"]
 EXPECTED_LEN = 126
 MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "hand_sign_model.keras"
+MAX_RECOGNIZED_SIGN_LOG = 200
 
 # Keep model in memory so each request can use it directly.
 MODEL = None
+RECOGNIZED_SIGN_LOG: list[str] = []
 
 
 def _load_model() -> tf.keras.Model | None:
@@ -47,6 +49,38 @@ class SimpleHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle POST prediction requests and return model prediction."""
+        if self.path == "/recognizedSign":
+            content_length = int(self.headers.get("Content-Length", 0))
+            raw_body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+
+            try:
+                body = json.loads(raw_body.decode("utf-8"))
+            except json.JSONDecodeError:
+                self._send_json(400, {"error": "Invalid JSON body"})
+                return
+
+            recognized_sign = body.get("recognizedSign")
+            if not isinstance(recognized_sign, str) or not recognized_sign.strip():
+                self._send_json(400, {"error": "'recognizedSign' must be a non-empty string"})
+                return
+
+            clean_sign = recognized_sign.strip()
+            RECOGNIZED_SIGN_LOG.append(clean_sign)
+            if len(RECOGNIZED_SIGN_LOG) > MAX_RECOGNIZED_SIGN_LOG:
+                del RECOGNIZED_SIGN_LOG[:-MAX_RECOGNIZED_SIGN_LOG]
+
+            print(f"Recognized sign received: {clean_sign}")
+
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "recognizedSign": clean_sign,
+                    "count": len(RECOGNIZED_SIGN_LOG),
+                },
+            )
+            return
+
         if self.path != "/predict":
             self._send_json(404, {"error": "Not Found"})
             return
@@ -127,6 +161,26 @@ class SimpleHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if self.path == "/recognizedSign":
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "count": len(RECOGNIZED_SIGN_LOG),
+                    "latest": RECOGNIZED_SIGN_LOG[-1] if RECOGNIZED_SIGN_LOG else None,
+                },
+            )
+            return
+
+        self._send_json(404, {"error": "Not Found"})
+
+    def do_DELETE(self) -> None:
+        """Allow resetting recognized sign history for testing."""
+        if self.path == "/recognizedSign":
+            RECOGNIZED_SIGN_LOG.clear()
+            self._send_json(200, {"status": "ok", "cleared": True, "count": 0})
+            return
+
         self._send_json(404, {"error": "Not Found"})
 
 
@@ -134,5 +188,8 @@ if __name__ == "__main__":
     MODEL = _load_model()
     server = HTTPServer((HOST, PORT), SimpleHandler)
     print(f"Server running at http://{HOST}:{PORT}")
-    print('POST to /predict with {"landmarks": [...]} or GET /health')
+    print('POST to /predict with {"landmarks": [...]}')
+    print('POST to /recognizedSign with {"recognizedSign": "hello"}')
+    print('GET /health or GET /recognizedSign')
+    print('DELETE /recognizedSign to clear stored values')
     server.serve_forever()

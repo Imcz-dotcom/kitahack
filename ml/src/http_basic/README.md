@@ -13,6 +13,7 @@ This keeps prediction logic in one place (the backend), so you can later replace
 ## Quick summary
 
 - Endpoint: `POST /predict`
+- Text capture endpoint: `POST /recognizedSign`
 - Health check: `GET /health`
 - Main server: `server.py`
 - Main client: `live_client.py`
@@ -43,7 +44,8 @@ This keeps prediction logic in one place (the backend), so you can later replace
 5. `server.py` validates input and pads 63-length input to 126.
 6. Server runs `model.predict(...)`.
 7. Server returns `label`, `confidence`, and `scores`.
-8. Client overlays result text on the webcam window.
+8. Client posts recognized label text to `POST /recognizedSign`.
+9. Client overlays result text on the webcam window.
 
 ---
 
@@ -171,6 +173,55 @@ Error responses:
 - `404` wrong path
 - `503` model not loaded
 
+### Captured text endpoint
+
+- Method: `POST`
+- URL: `http://127.0.0.1:8000/recognizedSign`
+- Header: `Content-Type: application/json`
+
+Request body:
+
+```json
+{
+  "recognizedSign": "hello"
+}
+```
+
+Validation rules:
+
+- `recognizedSign` must be a non-empty string.
+
+Success response (example):
+
+```json
+{
+  "status": "ok",
+  "recognizedSign": "hello",
+  "count": 12
+}
+```
+
+Related read endpoint:
+
+- `GET http://127.0.0.1:8000/recognizedSign`
+- Returns latest captured text and total count.
+
+Reset endpoint (useful for testing):
+
+- Method: `DELETE`
+- URL: `http://127.0.0.1:8000/recognizedSign`
+- Clears stored recognized sign history.
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "cleared": true,
+  "count": 0
+}
+```
+
 ---
 
 ## Code walkthrough
@@ -207,6 +258,7 @@ Main inference path:
 6. Reject any other length.
 7. Convert to `np.float32`, shape `(1, -1)`.
 8. Run prediction and return structured JSON.
+9. Accept recognized text on `/recognizedSign` and store latest values.
 
 ### `SimpleHandler.do_GET()`
 
