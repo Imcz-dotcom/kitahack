@@ -1,48 +1,96 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# ----- OS / Editor -----
 .DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+Thumbs.db
+*.swp
+*.swo
+*.tmp
 
-# IntelliJ related
+# VS Code / JetBrains
+.idea/
 *.iml
 *.ipr
 *.iws
-.idea/
+.vscode/.history/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# ----- Logs -----
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# ----- Dart / Flutter -----
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
-.pub-cache/
 .pub/
-/build/
-/coverage/
+.pub-cache/
+build/
+coverage/
 
-# Symbolication related
+# Generated docs
+doc/api/
+
+# Flutter symbol / map outputs
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# Android
+android/.gradle/
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# iOS / macOS generated
+ios/Flutter/ephemeral/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/.last_build_id
+ios/Pods/
+ios/.symlinks/
+ios/Runner.xcworkspace/
+ios/DerivedData/
+
+macos/Flutter/ephemeral/
+macos/Pods/
+macos/.symlinks/
+
+# Windows / Linux generated
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+
+# ----- Python / ML -----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.python-version
+
+# Virtual environments
+venv/
+.venv/
+ml/venv/
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Env files
+.env
+.env.*
+
+# ML data artifacts (keep folder structure, ignore contents)
+ml/data/raw/**
+!ml/data/raw/.gitkeep
+
+# Optional local notebooks/checkpoints
+.ipynb_checkpoints/
+
+# Local side projects / services
+flutter_app/
+tts_server/
 
 # Virtual environment
 venv/
@@ -61,3 +109,11 @@ ml/models/
 *.keras
 *.h5
 *.task
+# Service account for firebase database
+**/serviceAccount.json
+
+node_modules/
+.env
+
+# Temporary files of audio generation
+temp/

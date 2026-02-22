@@ -5,6 +5,7 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import urllib.request
+import json
 import os
 
 # =========================
@@ -14,6 +15,11 @@ MODEL_PATH = "models/hand_sign_model.keras"
 CLASSES = ["help", "cannot", "speak", "hello"]
 EXPECTED_LEN = 126
 HAND_LANDMARKER_MODEL = "models/hand_landmarker.task"
+
+# TTS Server config
+GENERATE_AUDIO_URL = "http://127.0.0.1:3000/api/generate-audio"
+USER_ID = "demo-user"
+POST_CONFIDENCE_THRESHOLD = 95.0  # percentage
 # =========================
 
 # Download MediaPipe hand landmarker model if not exists
@@ -39,11 +45,29 @@ options = vision.HandLandmarkerOptions(
 )
 detector = vision.HandLandmarker.create_from_options(options)
 
+def post_generate_audio(text, user_id):
+    """POST recognized text to /api/generate-audio. Returns (audioUrl, error)."""
+    payload = json.dumps({"text": text, "userId": user_id}).encode("utf-8")
+    req = urllib.request.Request(
+        GENERATE_AUDIO_URL,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return body.get("audioUrl"), None
+    except Exception as exc:
+        return None, str(exc)
+
+
 # Open webcam
 cap = cv2.VideoCapture(0)
 print("🎥 Camera started. Press Q to quit.")
 
 frame_count = 0
+last_posted_label = ""
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -86,7 +110,16 @@ while cap.isOpened():
             confidence = preds[class_id] * 100
 
             prediction_text = f"{label.upper()} ({confidence:.1f}%)"
-            
+
+            # POST to /api/generate-audio when confidence >= 95% and label changed
+            if confidence >= POST_CONFIDENCE_THRESHOLD and label != last_posted_label:
+                audio_url, post_err = post_generate_audio(label, USER_ID)
+                if post_err:
+                    print(f"[POST FAILED] text={label} error={post_err}")
+                else:
+                    last_posted_label = label
+                    print(f"[POST OK] text={label} confidence={confidence:.1f}% audioUrl={audio_url}")
+
             # Color based on confidence
             if confidence > 80:
                 color = (0, 255, 0)  # Green
