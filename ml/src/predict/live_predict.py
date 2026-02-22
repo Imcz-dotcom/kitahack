@@ -8,13 +8,18 @@ import urllib.request
 import json
 import os
 
+# Resolve project paths from this file location so script works from any cwd.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ML_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
+MODELS_DIR = os.path.join(ML_DIR, "models")
+
 # =========================
 # CONFIG
 # =========================
-MODEL_PATH = "models/hand_sign_model.keras"
+MODEL_PATH = os.path.join(MODELS_DIR, "hand_sign_model.keras")
 CLASSES = ["help", "cannot", "speak", "hello"]
 EXPECTED_LEN = 126
-HAND_LANDMARKER_MODEL = "models/hand_landmarker.task"
+HAND_LANDMARKER_MODEL = os.path.join(MODELS_DIR, "hand_landmarker.task")
 
 # TTS Server config
 GENERATE_AUDIO_URL = "http://127.0.0.1:3000/api/generate-audio"
@@ -25,6 +30,7 @@ POST_CONFIDENCE_THRESHOLD = 95.0  # percentage
 # Download MediaPipe hand landmarker model if not exists
 if not os.path.exists(HAND_LANDMARKER_MODEL):
     print("📥 Downloading hand landmarker model...")
+    os.makedirs(MODELS_DIR, exist_ok=True)
     url = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
     urllib.request.urlretrieve(url, HAND_LANDMARKER_MODEL)
     print("✅ Download complete")
