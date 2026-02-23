@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'pages/login_page.dart';
 import 'pages/sos_page.dart';
+import 'pages/sign_language_page.dart';
 
 void main() {
   runApp(const SignSOSApp());
@@ -27,6 +28,7 @@ class SignSOSApp extends StatelessWidget {
       routes: {
         '/login': (context) => const LoginPage(),
         '/sos': (context) => const SOSPage(),
+        '/sign-language': (context) => const SignLanguagePage(),
       },
     );
   }
