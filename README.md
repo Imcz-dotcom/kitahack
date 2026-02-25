@@ -16,6 +16,76 @@ Main working flow:
 
 ---
 
+## File-to-File Workflow (Who connects to what)
+
+This section shows exactly how files communicate in this repo.
+
+### A) Live prediction path (Python client -> Node API)
+
+1. `ml/src/predict/live_predict.py`
+	- Captures webcam frames (OpenCV)
+	- Detects hand landmarks (MediaPipe)
+	- Predicts label using `ml/models/hand_sign_model.keras`
+2. Still in `live_predict.py`, `post_generate_audio(...)`
+	- Sends `POST http://127.0.0.1:3000/api/generate-audio`
+	- Body: `{ text, userId }`
+3. Request is received by either:
+	- `tts_server/server.posttest.js` (mock mode), or
+	- `tts_server/server.js` (real mode)
+
+### B) Real backend path (inside Node server)
+
+When using `tts_server/server.js`:
+
+1. `tts_server/server.js`
+	- Mounts routes under `/api`
+	- Connects to `routes/ttsRoute.js` and `routes/audioRoute.js`
+2. `tts_server/routes/ttsRoute.js` (`POST /generate-audio`)
+	- Calls `generateSpeech(text)` in `tts_server/services/ttsService.js`
+	- Calls `uploadAudio(filePath)` and `saveMetadata(...)` in `tts_server/services/firebaseService.js`
+3. `tts_server/services/ttsService.js`
+	- Uses Google TTS, writes MP3 to `tts_server/temp/<uuid>.mp3`
+4. `tts_server/services/firebaseService.js`
+	- Uploads MP3 to Firebase Storage bucket
+	- Saves record to Firestore collection `audioRecords`
+5. `tts_server/config/firebase.js`
+	- Creates and exports shared Firebase `db` + `bucket`
+
+### C) Read records path
+
+1. Client calls `GET /api/audio-records`
+2. `tts_server/routes/audioRoute.js` reads `audioRecords` from Firestore (`db.collection(...).orderBy(...).get()`)
+3. Returns JSON list to caller
+
+### D) Current Flutter status
+
+- `lib/main.dart` is currently Flutter default scaffold.
+- Current end-to-end sign -> POST -> TTS pipeline is between:
+  - `ml/src/predict/live_predict.py`
+  - `tts_server/*`
+
+### E) Quick connection map
+
+```text
+ml/src/predict/live_predict.py
+  -> POST /api/generate-audio
+	  -> tts_server/server.posttest.js (mock)
+	  -> OR tts_server/server.js
+			 -> routes/ttsRoute.js
+				  -> services/ttsService.js
+				  -> services/firebaseService.js
+						 -> config/firebase.js
+						 -> Firebase Storage + Firestore
+
+GET /api/audio-records
+  -> tts_server/server.js
+		-> routes/audioRoute.js
+			 -> config/firebase.js (db)
+			 -> Firestore audioRecords
+```
+
+---
+
 ## Repository Structure
 
 ```text
