@@ -20,6 +20,7 @@ import base64
 import os
 import urllib.request
 import json
+import zipfile
 
 # ─── Paths ───────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,8 +31,7 @@ MODEL_PATH = os.path.join(MODELS_DIR, "hand_sign_model.keras")
 HAND_LANDMARKER_MODEL = os.path.join(MODELS_DIR, "hand_landmarker.task")
 
 # ─── Config ──────────────────────────────────────────────
-CLASSES = ["help", "cannot", "speak", "hello"]
-EXPECTED_LEN = 126  # 2 hands × 21 landmarks × 3 coords
+EXPECTED_LEN = 63  # 1 hand × 21 landmarks × 3 coords
 
 # TTS Server
 TTS_URL = "http://127.0.0.1:3000/api/generate-audio"
@@ -49,13 +49,45 @@ if not os.path.exists(HAND_LANDMARKER_MODEL):
 # ─── Load ML models ──────────────────────────────────────
 print("Loading TensorFlow model...")
 model = tf.keras.models.load_model(MODEL_PATH)
+
+# Load class labels dynamically from model's embedded labels
+labels_bytes = None
+with zipfile.ZipFile(MODEL_PATH, mode="r") as zf:
+    if "assets/hand_sign_labels.json" in zf.namelist():
+        labels_bytes = zf.read("assets/hand_sign_labels.json")
+
+if labels_bytes is not None:
+    CLASSES = json.loads(labels_bytes.decode("utf-8"))
+else:
+    DATA_DIR = os.path.join(ML_DIR, "data", "raw")
+    if not os.path.isdir(DATA_DIR):
+        raise FileNotFoundError(
+            "Embedded labels not found in model and fallback data/raw directory is missing. "
+            "Retrain model to embed labels."
+        )
+    CLASSES = sorted([
+        name for name in os.listdir(DATA_DIR)
+        if os.path.isdir(os.path.join(DATA_DIR, name))
+    ])
+    print("⚠️ Embedded labels not found in model; using fallback labels from data/raw.")
+
+if not isinstance(CLASSES, list) or not CLASSES:
+    raise ValueError("Invalid embedded labels format in model.")
+
+model_output_classes = int(model.output_shape[-1])
+if len(CLASSES) != model_output_classes:
+    raise ValueError(
+        f"Class mismatch: model expects {model_output_classes} classes, "
+        f"but loaded labels has {len(CLASSES)} classes. Retrain model."
+    )
+
 print(f"✅ Model loaded — classes: {CLASSES}")
 
 print("Loading MediaPipe Hand Landmarker...")
 base_options = python.BaseOptions(model_asset_path=HAND_LANDMARKER_MODEL)
 options = vision.HandLandmarkerOptions(
     base_options=base_options,
-    num_hands=2,
+    num_hands=1,
     min_hand_detection_confidence=0.5,
     min_hand_presence_confidence=0.5,
     min_tracking_confidence=0.5,
@@ -88,14 +120,11 @@ def predict_sign(image: np.ndarray) -> dict:
     if not detection_result.hand_landmarks:
         return {"label": None, "confidence": 0.0, "hands_detected": 0}
 
+    # Extract landmarks from one detected hand
     landmarks = []
-    for hand_landmarks in detection_result.hand_landmarks:
-        for lm in hand_landmarks:
-            landmarks.extend([lm.x, lm.y, lm.z])
-
-    # Pad to 126 if only one hand detected
-    if len(landmarks) == 63:
-        landmarks.extend([0.0] * 63)
+    hand_landmarks = detection_result.hand_landmarks[0]
+    for lm in hand_landmarks:
+        landmarks.extend([lm.x, lm.y, lm.z])
 
     if len(landmarks) != EXPECTED_LEN:
         return {"label": None, "confidence": 0.0, "hands_detected": len(detection_result.hand_landmarks)}

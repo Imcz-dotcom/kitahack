@@ -23,6 +23,7 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
   bool _cameraReady = false;
   bool _serverOnline = false;
   bool _alertSent = false;
+  bool _navigating = false;
   final List<String> _detectedWords = [];
 
   // Web camera
@@ -59,7 +60,7 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
   }
 
   /// Initialize web camera via HTML5 getUserMedia
-  Future<void> _initCamera() async {
+  Future<void> _initCamera({int retryCount = 0}) async {
     try {
       final stream = await html.window.navigator.mediaDevices!.getUserMedia({
         'video': {'facingMode': 'user', 'width': 640, 'height': 480},
@@ -85,6 +86,30 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
       });
     } catch (e) {
       debugPrint('Camera init error: $e');
+      // Retry up to 3 times with a delay (camera may be busy from previous session)
+      if (retryCount < 3) {
+        debugPrint('Retrying camera init (attempt ${retryCount + 1}/3)...');
+        await Future.delayed(const Duration(seconds: 1));
+        if (mounted) {
+          await _initCamera(retryCount: retryCount + 1);
+        }
+      } else if (mounted) {
+        // Show error to user after all retries fail
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              '📷 Camera unavailable. Close other apps using the camera and tap Retry.',
+            ),
+            backgroundColor: const Color(0xFFE53935),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            margin: const EdgeInsets.all(16),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
@@ -131,11 +156,17 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
           // Add to detected words list (avoid duplicates in a row)
           if (_currentLabel.isNotEmpty &&
               _confidence > 80 &&
+              _currentLabel != 'ok' &&
               (_detectedWords.isEmpty ||
                   _detectedWords.last != _currentLabel)) {
             _detectedWords.add(_currentLabel);
           }
         });
+
+        // Navigate to speech-to-text when 'ok' gesture is detected
+        if (_currentLabel == 'ok' && _confidence > 80 && !_navigating) {
+          _navigateToSpeechToText();
+        }
       }
     } catch (e) {
       debugPrint('Prediction error: $e');
@@ -153,19 +184,63 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
           children: [
             Icon(Icons.check_circle, color: Colors.white, size: 20),
             SizedBox(width: 10),
-            Text('🚨 Emergency alert sent! Help is on the way.'),
+            Text('🚨 Emergency alert sent! Connecting to nurse...'),
           ],
         ),
         backgroundColor: const Color(0xFF4CAF50),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         margin: const EdgeInsets.all(16),
-        duration: const Duration(seconds: 4),
+        duration: const Duration(seconds: 2),
       ),
     );
 
-    Future.delayed(const Duration(seconds: 5), () {
-      if (mounted) setState(() => _alertSent = false);
+    // Navigate to speech-to-text page after a brief delay
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (mounted) {
+        _captureTimer?.cancel();
+        _stopCamera();
+        Navigator.pushReplacementNamed(
+          context,
+          '/speech-to-text',
+          arguments: _detectedWords.join(' '),
+        );
+      }
+    });
+  }
+
+  void _navigateToSpeechToText() {
+    _navigating = true;
+    _captureTimer?.cancel();
+    _stopCamera();
+
+    // Show brief feedback
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white, size: 20),
+            SizedBox(width: 10),
+            Text('👌 OK detected! Opening chat with nurse...'),
+          ],
+        ),
+        backgroundColor: const Color(0xFF4CAF50),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+
+    // Navigate after a short delay for the snackbar to be visible
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (mounted) {
+        Navigator.pushReplacementNamed(
+          context,
+          '/speech-to-text',
+          arguments: _detectedWords.join(' '),
+        );
+      }
     });
   }
 

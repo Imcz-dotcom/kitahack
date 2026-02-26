@@ -112,8 +112,7 @@ class _SOSPageState extends State<SOSPage> with TickerProviderStateMixin {
                 ),
               ),
 
-              // Bottom info
-              _buildBottomInfo(),
+              const SizedBox(height: 24),
             ],
           ),
         ),
