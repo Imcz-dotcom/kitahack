@@ -6,27 +6,35 @@ import numpy as np
 import os
 import urllib.request
 
+# Resolve project paths from this file location so script works from any cwd.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ML_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+DATA_DIR = os.path.join(ML_DIR, "data", "raw")
+MODELS_DIR = os.path.join(ML_DIR, "models")
+
 # =========================
 # CONFIG
 # =========================
-LABEL = "hello"          # change to: help / not_help
+LABEL = "ok"          # example: help / cannot / speak / hello / i
 NUM_SAMPLES = 150       # recommended: 100–200
-BASE_DIR = "data/raw"
-SAVE_DIR = os.path.join(BASE_DIR, LABEL)
+CLASS_LABEL = LABEL.strip().lower()
+if not CLASS_LABEL:
+    raise ValueError("LABEL cannot be empty or whitespace. Set LABEL to a class name, e.g. 'i'.")
+SAVE_DIR = os.path.join(DATA_DIR, CLASS_LABEL)
 REQUIRED_HANDS = 1     
 EXPECTED_LENGTH = REQUIRED_HANDS * 21 * 3
-HAND_LANDMARKER_MODEL = "models/hand_landmarker.task"
+HAND_LANDMARKER_MODEL = os.path.join(MODELS_DIR, "hand_landmarker.task")
 # =========================
 
 # Create save directory safely (Windows-proof)
-if not os.path.isdir(SAVE_DIR):
-    os.makedirs(SAVE_DIR)
+os.makedirs(SAVE_DIR, exist_ok=True)
 
 print(f"Saving samples to: {SAVE_DIR}")
 
 # Download MediaPipe hand landmarker model if not exists
 if not os.path.exists(HAND_LANDMARKER_MODEL):
     print("📥 Downloading hand landmarker model...")
+    os.makedirs(MODELS_DIR, exist_ok=True)
     url = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
     urllib.request.urlretrieve(url, HAND_LANDMARKER_MODEL)
     print("✅ Download complete")
@@ -35,7 +43,7 @@ if not os.path.exists(HAND_LANDMARKER_MODEL):
 base_options = python.BaseOptions(model_asset_path=HAND_LANDMARKER_MODEL)
 options = vision.HandLandmarkerOptions(
     base_options=base_options,
-    num_hands=2,
+    num_hands=1,
     min_hand_detection_confidence=0.7,
     min_hand_presence_confidence=0.7,
     min_tracking_confidence=0.7
@@ -46,7 +54,7 @@ detector = vision.HandLandmarker.create_from_options(options)
 cap = cv2.VideoCapture(0)
 count = 0
 
-print(f"Collecting '{LABEL}' samples...")
+print(f"Collecting '{CLASS_LABEL}' samples...")
 
 while cap.isOpened() and count < NUM_SAMPLES:
     ret, frame = cap.read()
@@ -66,20 +74,21 @@ while cap.isOpened() and count < NUM_SAMPLES:
 
     landmarks = []
 
-    # If hands detected, extract landmarks and draw them
+    # If a hand is detected, extract landmarks and draw only one hand
     if detection_result.hand_landmarks:
-        for hand_landmarks in detection_result.hand_landmarks:
-            # Draw hand landmarks on the frame
-            for landmark in hand_landmarks:
-                x = int(landmark.x * w)
-                y = int(landmark.y * h)
-                cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
-            
-            # Extract landmark coordinates
-            for lm in hand_landmarks:
-                landmarks.extend([lm.x, lm.y, lm.z])
+        hand_landmarks = detection_result.hand_landmarks[0]
 
-        # Only save if required number of hands are detected
+        # Draw hand landmarks on the frame
+        for landmark in hand_landmarks:
+            x = int(landmark.x * w)
+            y = int(landmark.y * h)
+            cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+
+        # Extract landmark coordinates
+        for lm in hand_landmarks:
+            landmarks.extend([lm.x, lm.y, lm.z])
+
+        # Auto-save when one valid hand vector is ready
         if len(detection_result.hand_landmarks) == REQUIRED_HANDS and len(landmarks) == EXPECTED_LENGTH:
             np.save(
                 os.path.join(SAVE_DIR, f"{count}.npy"),
@@ -89,21 +98,26 @@ while cap.isOpened() and count < NUM_SAMPLES:
             print(f"Saved {count}/{NUM_SAMPLES}")
 
     # Add text overlay with instructions and progress
-    cv2.putText(frame, f"Collecting: {LABEL}", (10, 30), 
+    cv2.putText(frame, f"Collecting: {CLASS_LABEL}", (10, 30), 
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
     cv2.putText(frame, f"Progress: {count}/{NUM_SAMPLES}", (10, 70), 
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-    cv2.putText(frame, "Press 'Q' to quit", (10, 110), 
+    cv2.putText(frame, "Auto-capture: ON", (10, 110), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(frame, "Press 'Q' to quit", (10, 140), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     
     # Show status based on hand detection
     if detection_result.hand_landmarks:
         num_hands = len(detection_result.hand_landmarks)
-        cv2.putText(frame, f"Hands detected: {num_hands}", (10, 150), 
+        cv2.putText(frame, f"Hands detected: {num_hands}", (10, 180), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     else:
-        cv2.putText(frame, "No hands detected", (10, 150), 
+        cv2.putText(frame, "No hands detected", (10, 180), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+    cv2.putText(frame, "Show 1 clear hand to capture", (10, 210), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
 
     # Show camera window
     cv2.imshow("Collecting Hand Sign Data", frame)

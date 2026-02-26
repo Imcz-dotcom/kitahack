@@ -12,7 +12,7 @@ class _SOSPageState extends State<SOSPage> with TickerProviderStateMixin {
   late AnimationController _ringController;
   late Animation<double> _pulseAnimation;
   late Animation<double> _ringAnimation;
-  bool _alertSent = false;
+  final bool _alertSent = false;
 
   @override
   void initState() {
