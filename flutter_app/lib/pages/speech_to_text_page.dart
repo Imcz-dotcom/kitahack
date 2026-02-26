@@ -214,7 +214,7 @@ class _SpeechToTextPageState extends State<SpeechToTextPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Nurse Chat',
+                  'Emergency Chat',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.bold,
