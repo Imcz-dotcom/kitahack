@@ -13,7 +13,9 @@ const client = new textToSpeech.TextToSpeechClient({
 exports.generateSpeech = async (text) => {
   const fileName = `${uuid()}.mp3`
   // Will add the generated file to a temp directory. 
-  const filePath = path.join(__dirname, "../temp", fileName)
+  const tempDir = path.join(__dirname, "../temp")
+  fs.mkdirSync(tempDir, { recursive: true })
+  const filePath = path.join(tempDir, fileName)
 
   const request = {
     input: { text },

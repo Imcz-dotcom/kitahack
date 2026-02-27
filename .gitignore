@@ -4,6 +4,7 @@ Thumbs.db
 *.swp
 *.swo
 *.tmp
+desktop.ini
 
 # VS Code / JetBrains
 .idea/
@@ -11,12 +12,23 @@ Thumbs.db
 *.ipr
 *.iws
 .vscode/.history/
+.vscode/settings.json
+
+# ----- Environment / Secrets -----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
 
 # ----- Logs -----
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # ----- Dart / Flutter -----
 .dart_tool/
@@ -26,6 +38,10 @@ yarn-error.log*
 .pub-cache/
 build/
 coverage/
+**/build/
+**/.dart_tool/
+**/.pub/
+**/.pub-cache/
 
 # Generated docs
 doc/api/
@@ -34,16 +50,65 @@ doc/api/
 app.*.symbols
 app.*.map.json
 
+# Generated Flutter plugin registrants
+**/generated_plugin_registrant.*
+**/generated_plugins.cmake
+**/GeneratedPluginRegistrant.*
+
 # Android Studio will place build artifacts here
 /android/app/debug
 /android/app/profile
 /android/app/release
 
+# Root mobile folders (outside flutter_app)
+/android/
+/ios/
+
+# iOS / macOS Flutter generated
+**/Flutter/ephemeral/
+**/Flutter/Generated.xcconfig
+**/flutter_export_environment.sh
+
 # Service account for firebase database
 **/serviceAccount.json
 
+# ----- Node.js -----
 node_modules/
-.env
+**/node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
 
 # Temporary files of audio generation
 temp/
+**/temp/
+
+# ----- Python / ML -----
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+env/
+ENV/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+
+# ML data / training outputs (local only)
+ml/data/raw/
+ml/data/processed/
+ml/data/interim/
+ml/runs/
+ml/checkpoints/
+ml/artifacts/
+
+# ----- Test outputs -----
+.nyc_output/
+junit.xml
+test-results/

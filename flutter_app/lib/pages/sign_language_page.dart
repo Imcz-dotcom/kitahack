@@ -24,6 +24,9 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
   bool _serverOnline = false;
   bool _alertSent = false;
   bool _navigating = false;
+  String? _lastPlayedAudioUrl;
+  html.AudioElement? _activeAudio;
+  String _textBuffer = '';
   final List<String> _detectedWords = [];
 
   // Web camera
@@ -148,31 +151,61 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+
+        final dynamic postResult = data['post_result'];
+        if (postResult is Map) {
+          final action = (postResult['action'] ?? '').toString();
+
+          if (action == 'space') {
+            setState(() => _textBuffer = (postResult['text'] ?? _textBuffer).toString());
+          }
+
+          if (action == 'send' && postResult['success'] == true) {
+            final audioUrl = (postResult['audioUrl'] ?? '').toString();
+            final postedText = (postResult['text'] ?? '').toString();
+
+            if (audioUrl.isNotEmpty && audioUrl != _lastPlayedAudioUrl) {
+              _lastPlayedAudioUrl = audioUrl;
+              await _playAudio(audioUrl);
+            }
+
+            if (!_navigating && postedText.isNotEmpty) {
+              _navigateToSpeechToText(postedText);
+            }
+          }
+        }
+
         setState(() {
           _currentLabel = data['label'] ?? '';
           _confidence = (data['confidence'] ?? 0.0).toDouble();
           _handsDetected = data['hands_detected'] ?? 0;
-
-          // Add to detected words list (avoid duplicates in a row)
-          if (_currentLabel.isNotEmpty &&
-              _confidence > 80 &&
-              _currentLabel != 'ok' &&
-              (_detectedWords.isEmpty ||
-                  _detectedWords.last != _currentLabel)) {
-            _detectedWords.add(_currentLabel);
-          }
+          _textBuffer = (data['text_buffer'] ?? '').toString();
         });
-
-        // Navigate to speech-to-text when 'ok' gesture is detected
-        if (_currentLabel == 'ok' && _confidence > 80 && !_navigating) {
-          _navigateToSpeechToText();
-        }
       }
     } catch (e) {
       debugPrint('Prediction error: $e');
     }
 
     setState(() => _isProcessing = false);
+  }
+
+  Future<void> _playAudio(String audioUrl) async {
+    try {
+      _activeAudio = html.AudioElement(audioUrl)
+        ..autoplay = true
+        ..controls = false
+        ..volume = 1.0;
+      await _activeAudio!.play();
+    } catch (e) {
+      debugPrint('Audio playback failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Audio generated, but browser blocked autoplay.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _sendEmergencyAlert() {
@@ -209,7 +242,7 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
     });
   }
 
-  void _navigateToSpeechToText() {
+  void _navigateToSpeechToText(String postedText) {
     _navigating = true;
     _captureTimer?.cancel();
     _stopCamera();
@@ -221,7 +254,7 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
           children: [
             Icon(Icons.check_circle, color: Colors.white, size: 20),
             SizedBox(width: 10),
-            Text('👌 OK detected! Opening chat with nurse...'),
+            Text('✅ DONE detected! Opening chat with nurse...'),
           ],
         ),
         backgroundColor: const Color(0xFF4CAF50),
@@ -233,19 +266,22 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
     );
 
     // Navigate after a short delay for the snackbar to be visible
-    Future.delayed(const Duration(milliseconds: 800), () {
+    Future.delayed(const Duration(milliseconds: 1800), () {
       if (mounted) {
         Navigator.pushReplacementNamed(
           context,
           '/speech-to-text',
-          arguments: _detectedWords.join(' '),
+          arguments: postedText,
         );
       }
     });
   }
 
   void _clearWords() {
-    setState(() => _detectedWords.clear());
+    setState(() {
+      _detectedWords.clear();
+      _textBuffer = '';
+    });
   }
 
   @override
@@ -543,22 +579,23 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              _detectedWords.isNotEmpty
-                  ? _detectedWords.join(' → ')
-                  : 'Detected words will appear here...',
+              _textBuffer.isNotEmpty
+                  ? _textBuffer
+                  : 'Text buffer will appear here (use OK for space)...',
               style: TextStyle(
                 fontSize: 14,
-                color: _detectedWords.isNotEmpty
+                color: _textBuffer.isNotEmpty
                     ? const Color(0xFF1A1A2E)
                     : Colors.grey.shade400,
-                fontWeight: _detectedWords.isNotEmpty
+                fontWeight: _textBuffer.isNotEmpty
                     ? FontWeight.w600
                     : FontWeight.normal,
               ),
-              overflow: TextOverflow.ellipsis,
+              maxLines: 3,
+              overflow: TextOverflow.fade,
             ),
           ),
-          if (_detectedWords.isNotEmpty)
+          if (_textBuffer.isNotEmpty)
             GestureDetector(
               onTap: _clearWords,
               child: Icon(Icons.close, color: Colors.grey.shade400, size: 18),

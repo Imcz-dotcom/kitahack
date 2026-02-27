@@ -9,6 +9,10 @@ import json
 import os
 import zipfile
 import time
+import argparse
+import base64
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 # Resolve project paths from this file location so script works from any cwd.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,13 +31,19 @@ HAND_LANDMARKER_MODEL = os.path.join(MODELS_DIR, "hand_landmarker.task")
 GENERATE_AUDIO_URL = "http://127.0.0.1:3000/api/generate-audio"
 USER_ID = "demo-user"
 POST_CONFIDENCE_THRESHOLD = 95.0  # percentage
-APPEND_CONFIDENCE_THRESHOLD = 90.0
-STABLE_FRAMES_REQUIRED = 4
-SEND_CONFIDENCE_THRESHOLD = 80.0
-SEND_STABLE_FRAMES_REQUIRED = 2
+APPEND_CONFIDENCE_THRESHOLD = 60.0
+STABLE_FRAMES_REQUIRED = 2
+SEND_CONFIDENCE_THRESHOLD = 60.0
+SEND_STABLE_FRAMES_REQUIRED = 1
 APPEND_COOLDOWN_SECONDS = 0.8
-SEND_TRIGGER_LABEL = "ok"
+WORD_SEPARATOR_LABEL = "ok"
+SEND_TRIGGER_LABEL = "done"
+SEPARATOR_CONFIDENCE_THRESHOLD = 35.0
+SEPARATOR_STABLE_FRAMES_REQUIRED = 1
+SEPARATOR_COOLDOWN_SECONDS = 0.6
 SEND_COOLDOWN_SECONDS = 2.0
+DONE_CONFIDENCE_THRESHOLD = 75.0
+DONE_MIN_MARGIN = 12.0
 # =========================
 
 # Download MediaPipe hand landmarker model if not exists
@@ -83,7 +93,15 @@ print(f"📋 Classes: {CLASSES}")
 if SEND_TRIGGER_LABEL not in CLASSES:
     print(
         f"⚠️ Send trigger '{SEND_TRIGGER_LABEL}' is not in classes. "
-        "Add/collect/train an 'ok' label to enable hands-free sending."
+        "Add/collect/train a 'done' label to enable hands-free sending."
+    )
+else:
+    print(f"✅ Send trigger active: {SEND_TRIGGER_LABEL}")
+
+if WORD_SEPARATOR_LABEL and WORD_SEPARATOR_LABEL not in CLASSES:
+    print(
+        f"⚠️ Word separator '{WORD_SEPARATOR_LABEL}' is not in classes. "
+        "Add/collect/train this label to insert spaces between words."
     )
 
 # MediaPipe Hand Landmarker setup
@@ -96,6 +114,151 @@ options = vision.HandLandmarkerOptions(
     min_tracking_confidence=0.5
 )
 detector = vision.HandLandmarker.create_from_options(options)
+
+
+class PredictionState:
+    def __init__(self):
+        self.typed_text = ""
+        self.last_predicted_label = ""
+        self.stable_count = 0
+        self.last_appended_label = ""
+        self.last_append_time = 0.0
+        self.last_send_time = 0.0
+        self.last_committed_label = ""
+        self.hand_left_since_commit = True
+
+    def update(self, label, confidence, hand_detected, margin=100.0):
+        post_result = None
+
+        if not hand_detected:
+            self.hand_left_since_commit = True
+            self.last_predicted_label = ""
+            self.stable_count = 0
+            return post_result
+
+        if label == self.last_predicted_label:
+            self.stable_count += 1
+        else:
+            self.last_predicted_label = label
+            self.stable_count = 1
+
+        now = time.time()
+
+        if (
+            label == SEND_TRIGGER_LABEL
+            and confidence >= DONE_CONFIDENCE_THRESHOLD
+            and margin >= DONE_MIN_MARGIN
+            and self.stable_count >= SEND_STABLE_FRAMES_REQUIRED
+            and (now - self.last_send_time) >= SEND_COOLDOWN_SECONDS
+        ):
+            text_to_send = self.typed_text.strip()
+            if text_to_send:
+                audio_url, post_err = post_generate_audio(text_to_send, USER_ID)
+                if post_err:
+                    print(f"[POST FAILED] text=\"{text_to_send}\" error={post_err}")
+                    post_result = {
+                        "action": "send",
+                        "success": False,
+                        "error": post_err,
+                        "text": text_to_send,
+                    }
+                else:
+                    print(f"[POST OK] text=\"{text_to_send}\" audioUrl={audio_url}")
+                    post_result = {
+                        "action": "send",
+                        "success": True,
+                        "audioUrl": audio_url,
+                        "text": text_to_send,
+                    }
+                    self.typed_text = ""
+            else:
+                print("[POST SKIPPED] Text buffer is empty.")
+
+            self.last_send_time = now
+            self.last_committed_label = label
+            self.hand_left_since_commit = False
+
+        if (
+            label == WORD_SEPARATOR_LABEL
+            and confidence >= SEPARATOR_CONFIDENCE_THRESHOLD
+            and self.stable_count >= SEPARATOR_STABLE_FRAMES_REQUIRED
+            and self.typed_text
+            and not self.typed_text.endswith(" ")
+            and (now - self.last_append_time) >= SEPARATOR_COOLDOWN_SECONDS
+        ):
+            self.typed_text += " "
+            self.last_appended_label = label
+            self.last_append_time = now
+            self.last_committed_label = label
+            self.hand_left_since_commit = False
+            print(f"[SPACE] '{label}' -> \"{self.typed_text}\"")
+            post_result = {"action": "space", "text": self.typed_text}
+
+        if (
+            label != SEND_TRIGGER_LABEL
+            and label != WORD_SEPARATOR_LABEL
+            and confidence >= APPEND_CONFIDENCE_THRESHOLD
+            and self.stable_count >= STABLE_FRAMES_REQUIRED
+            and (self.hand_left_since_commit or label != self.last_committed_label)
+            and (
+                label != self.last_appended_label
+                or (now - self.last_append_time) >= APPEND_COOLDOWN_SECONDS
+            )
+        ):
+            self.typed_text += label
+            self.last_appended_label = label
+            self.last_append_time = now
+            self.last_committed_label = label
+            self.hand_left_since_commit = False
+            print(f"[APPEND] '{label}' -> \"{self.typed_text}\"")
+
+        return post_result
+
+
+def predict_from_bgr(frame):
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+    detection_result = detector.detect(mp_image)
+
+    if not detection_result.hand_landmarks:
+        return None, 0.0, 0, []
+
+    hand_landmarks = detection_result.hand_landmarks[0]
+    landmarks = []
+    for landmark in hand_landmarks:
+        landmarks.extend([landmark.x, landmark.y, landmark.z])
+
+    if len(landmarks) != EXPECTED_LEN:
+        return None, 0.0, len(detection_result.hand_landmarks), hand_landmarks
+
+    X = np.array(landmarks, dtype=np.float32).reshape(1, -1)
+    preds = model.predict(X, verbose=0)[0]
+    sorted_idx = np.argsort(preds)[::-1]
+    class_id = int(sorted_idx[0])
+    second_id = int(sorted_idx[1]) if len(sorted_idx) > 1 else class_id
+    label = CLASSES[class_id]
+    second_label = CLASSES[second_id]
+    confidence = float(preds[class_id] * 100)
+    second_confidence = float(preds[second_id] * 100)
+    margin = confidence - second_confidence
+    return (
+        label,
+        confidence,
+        len(detection_result.hand_landmarks),
+        hand_landmarks,
+        second_label,
+        second_confidence,
+        margin,
+    )
+
+
+def decode_base64_image(image_b64):
+    image_bytes = base64.b64decode(image_b64)
+    np_arr = np.frombuffer(image_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise ValueError("Failed to decode image")
+    return frame
 
 def post_generate_audio(text, user_id):
     """POST recognized text to /api/generate-audio. Returns (audioUrl, error)."""
@@ -114,175 +277,187 @@ def post_generate_audio(text, user_id):
         return None, str(exc)
 
 
-# Open webcam
-cap = cv2.VideoCapture(0)
-print("🎥 Camera started. Press Q to quit.")
+def run_webcam_mode():
+    state = PredictionState()
 
-frame_count = 0
-typed_text = ""
-last_predicted_label = ""
-stable_count = 0
-last_appended_label = ""
-last_append_time = 0.0
-last_send_time = 0.0
-last_committed_label = ""
-hand_left_since_commit = True
+    cap = None
+    for cam_index in [0, 1, 2]:
+        test_cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+        if test_cap.isOpened():
+            cap = test_cap
+            print(f"🎥 Camera started on index {cam_index}. Press Q to quit.")
+            break
+        test_cap.release()
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        print("Failed to grab frame")
-        break
+    if cap is None:
+        raise RuntimeError("No available camera found. Close apps using camera and try again.")
 
-    frame_count += 1
-    frame = cv2.flip(frame, 1)
-    h, w, c = frame.shape
-    
-    # Convert to RGB for MediaPipe
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-    
-    # Detect hands
-    detection_result = detector.detect(mp_image)
-    hand_detected = bool(detection_result.hand_landmarks)
+    frame_count = 0
 
-    if not hand_detected:
-        hand_left_since_commit = True
-        last_predicted_label = ""
-        stable_count = 0
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
 
-    landmarks = []
-    prediction_text = "No hands detected"
-    color = (255, 255, 255)  # White
+        frame_count += 1
+        frame = cv2.flip(frame, 1)
+        h, w, _ = frame.shape
 
-    if hand_detected:
-        # Extract landmarks from one detected hand
-        hand_landmarks = detection_result.hand_landmarks[0]
-        for landmark in hand_landmarks:
-            landmarks.extend([landmark.x, landmark.y, landmark.z])
+        (
+            label,
+            confidence,
+            hands_detected,
+            hand_landmarks,
+            second_label,
+            second_confidence,
+            margin,
+        ) = predict_from_bgr(frame)
+        hand_detected = hands_detected > 0
 
-        # Make prediction if we have correct number of landmarks
-        if len(landmarks) == EXPECTED_LEN:
-            X = np.array(landmarks, dtype=np.float32).reshape(1, -1)
-            
-            preds = model.predict(X, verbose=0)[0]
-            class_id = np.argmax(preds)
-            label = CLASSES[class_id]
-            confidence = preds[class_id] * 100
+        prediction_text = "No hands detected"
+        color = (255, 255, 255)
 
-            prediction_text = f"{label.upper()} ({confidence:.1f}%)"
-
-            if label == last_predicted_label:
-                stable_count += 1
-            else:
-                last_predicted_label = label
-                stable_count = 1
-
-            now = time.time()
-
-            # Show 'ok' sign to send built text automatically
+        if hand_detected and label is not None:
             if (
                 label == SEND_TRIGGER_LABEL
-                and confidence >= SEND_CONFIDENCE_THRESHOLD
-                and stable_count >= SEND_STABLE_FRAMES_REQUIRED
-                and (hand_left_since_commit or label != last_committed_label)
-                and (now - last_send_time) >= SEND_COOLDOWN_SECONDS
+                and second_label == WORD_SEPARATOR_LABEL
+                and margin < DONE_MIN_MARGIN
             ):
-                text_to_send = typed_text.strip()
-                if text_to_send:
-                    audio_url, post_err = post_generate_audio(text_to_send, USER_ID)
-                    if post_err:
-                        print(f"[POST FAILED] text=\"{text_to_send}\" error={post_err}")
-                    else:
-                        print(f"[POST OK] text=\"{text_to_send}\" audioUrl={audio_url}")
-                        typed_text = ""
-                else:
-                    print("[POST SKIPPED] Text buffer is empty.")
+                label = WORD_SEPARATOR_LABEL
+                confidence = second_confidence
+                margin = 100.0
 
-                last_send_time = now
-                last_committed_label = label
-                hand_left_since_commit = False
+            prediction_text = f"{label.upper()} ({confidence:.1f}%)"
+            state.update(label, confidence, True, margin=margin)
 
-            if (
-                label != SEND_TRIGGER_LABEL
-                and
-                confidence >= APPEND_CONFIDENCE_THRESHOLD
-                and stable_count >= STABLE_FRAMES_REQUIRED
-                and (hand_left_since_commit or label != last_committed_label)
-                and (label != last_appended_label or (now - last_append_time) >= APPEND_COOLDOWN_SECONDS)
-            ):
-                typed_text += label
-                last_appended_label = label
-                last_append_time = now
-                last_committed_label = label
-                hand_left_since_commit = False
-                print(f"[APPEND] '{label}' -> \"{typed_text}\"")
-
-            # Color based on confidence
             if confidence > 80:
-                color = (0, 255, 0)  # Green
+                color = (0, 255, 0)
             elif confidence > 60:
-                color = (0, 255, 255)  # Yellow
+                color = (0, 255, 255)
             else:
-                color = (0, 165, 255)  # Orange
+                color = (0, 165, 255)
+        else:
+            state.update("", 0.0, False)
 
-        # Draw hand landmarks
         for landmark in hand_landmarks:
             x = int(landmark.x * w)
             y = int(landmark.y * h)
             cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
 
-    # Display prediction
-    cv2.putText(
-        frame,
-        prediction_text,
-        (10, 50),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.2,
-        color,
-        3
-    )
+        cv2.putText(frame, prediction_text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
+        cv2.putText(
+            frame,
+            f"Text: {state.typed_text if state.typed_text else '-'}",
+            (10, 95),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (255, 255, 255),
+            2,
+        )
+        cv2.putText(
+            frame,
+            "Show 'ok' for space, 'done' to send  Q=quit",
+            (10, 130),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 255),
+            1,
+        )
+        cv2.putText(
+            frame,
+            f"Frame: {frame_count}",
+            (10, h - 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 255),
+            1,
+        )
 
-    cv2.putText(
-        frame,
-        f"Text: {typed_text if typed_text else '-'}",
-        (10, 95),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2
-    )
+        cv2.imshow("Hand Sign Recognition", frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
+            break
 
-    cv2.putText(
-        frame,
-        "Show 'ok' to send  Q=quit",
-        (10, 130),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (255, 255, 255),
-        1
-    )
+    cap.release()
+    cv2.destroyAllWindows()
+    print("\n✅ Application closed")
 
-    # Show frame info
-    cv2.putText(
-        frame,
-        f"Frame: {frame_count}",
-        (10, h - 20),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (255, 255, 255),
-        1
-    )
 
-    # Display frame
-    cv2.imshow("Hand Sign Recognition", frame)
+def run_server_mode(host, port):
+    app = Flask(__name__)
+    CORS(app)
+    state = PredictionState()
 
-    key = cv2.waitKey(1) & 0xFF
+    @app.route("/health", methods=["GET"])
+    def health():
+        return jsonify({"status": "ok", "classes": CLASSES})
 
-    # Quit on 'q'
-    if key == ord("q"):
-        break
+    @app.route("/predict", methods=["POST"])
+    def predict():
+        payload = request.get_json(force=True) or {}
+        image_b64 = payload.get("image")
 
-cap.release()
-cv2.destroyAllWindows()
-print("\n✅ Application closed")
+        if not image_b64:
+            return jsonify({"error": "No image provided"}), 400
+
+        try:
+            frame = decode_base64_image(image_b64)
+        except Exception as exc:
+            return jsonify({"error": f"Failed to decode image: {exc}"}), 400
+
+        (
+            label,
+            confidence,
+            hands_detected,
+            _,
+            second_label,
+            second_confidence,
+            margin,
+        ) = predict_from_bgr(frame)
+        hand_detected = hands_detected > 0
+
+        if (
+            hand_detected
+            and label == SEND_TRIGGER_LABEL
+            and second_label == WORD_SEPARATOR_LABEL
+            and margin < DONE_MIN_MARGIN
+        ):
+            label = WORD_SEPARATOR_LABEL
+            confidence = second_confidence
+            margin = 100.0
+
+        response = {
+            "label": label or "",
+            "confidence": round(confidence, 1),
+            "hands_detected": hands_detected,
+            "text_buffer": state.typed_text,
+        }
+
+        if hand_detected and label is not None:
+            post_result = state.update(label, confidence, True, margin=margin)
+            response["text_buffer"] = state.typed_text
+            if post_result is not None:
+                response["post_result"] = post_result
+        else:
+            state.update("", 0.0, False)
+
+        return jsonify(response)
+
+    print(f"🚀 live_predict server mode on http://{host}:{port}")
+    print(f"📋 Classes: {CLASSES}")
+    print(f"🔗 TTS endpoint: {GENERATE_AUDIO_URL}")
+    app.run(host=host, port=port, debug=False)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--server", action="store_true", help="Run as HTTP API for Flutter web camera frames")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=5000)
+    args = parser.parse_args()
+
+    if args.server:
+        run_server_mode(args.host, args.port)
+    else:
+        run_webcam_mode()
