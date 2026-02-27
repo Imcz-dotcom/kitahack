@@ -15,7 +15,7 @@ MODELS_DIR = os.path.join(ML_DIR, "models")
 # =========================
 # CONFIG
 # =========================
-LABEL = "ok"          # example: help / cannot / speak / hello / i
+LABEL = "help"          # example: help / cannot / speak / hello / i
 NUM_SAMPLES = 150       # recommended: 100–200
 CLASS_LABEL = LABEL.strip().lower()
 if not CLASS_LABEL:
