@@ -1,6 +1,6 @@
-# KitaHack
+# Sign SOS
 
-KitaHack is a multi-stack project that combines:
+Sign SOS is a multi-stack project that combines:
 
 - A Flutter app scaffold (`lib/`, `android/`, `ios/`, etc.)
 - A Python ML pipeline for hand-sign recognition (`ml/`)
@@ -120,6 +120,12 @@ kitahack/
 - **ML / CV:** Python, TensorFlow, MediaPipe, OpenCV, NumPy
 - **Backend API:** Node.js, Express, Firebase Admin, Google Cloud Text-to-Speech
 - **Mobile scaffold:** Flutter (Dart)
+
+---
+
+## Architecture Diagram
+
+<img width="1920" height="1080" alt="kitahack" src="https://github.com/user-attachments/assets/5fea22f0-98e0-4bb2-883f-eed24494627c" />
 
 ---
 
