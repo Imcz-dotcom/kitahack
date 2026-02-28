@@ -6,6 +6,14 @@ Sign SOS is a multi-stack project that combines:
 - A Python ML pipeline for hand-sign recognition (`ml/`)
 - A Node.js TTS backend with API routes (`tts_server/`)
 
+---
+
+## Demo Video
+
+[![Watch the full demo](https://img.youtube.com/vi/5kAiSFJM1JA/0.jpg)](https://www.youtube.com/watch?v=5kAiSFJM1JA)
+
+---
+
 Main working flow:
 
 1. Webcam captures hand landmarks (MediaPipe in Python)
