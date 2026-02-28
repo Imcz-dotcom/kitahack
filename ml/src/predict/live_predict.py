@@ -444,6 +444,17 @@ def run_server_mode(host, port):
 
         return jsonify(response)
 
+    @app.route("/clear-buffer", methods=["POST"])
+    def clear_buffer():
+        state.typed_text = ""
+        state.last_predicted_label = ""
+        state.stable_count = 0
+        state.last_appended_label = ""
+        state.last_append_time = 0.0
+        state.last_committed_label = ""
+        state.hand_left_since_commit = True
+        return jsonify({"success": True, "text_buffer": state.typed_text})
+
     print(f"🚀 live_predict server mode on http://{host}:{port}")
     print(f"📋 Classes: {CLASSES}")
     print(f"🔗 TTS endpoint: {GENERATE_AUDIO_URL}")

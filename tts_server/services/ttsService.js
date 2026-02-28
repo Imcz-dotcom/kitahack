@@ -6,7 +6,7 @@ const textToSpeech = require("@google-cloud/text-to-speech")
 
 // Creating a new instance of the TextToSpeechClient with the specified service account key file for authentication.
 const client = new textToSpeech.TextToSpeechClient({
-  keyFilename: "./config/serviceAccount.json"
+  keyFilename: path.join(__dirname, "../config/serviceAccount.json")
 })
 
 // Exporting the generateSpeech function, which takes text as input, generates speech using the Google Cloud Text-to-Speech API, saves the audio content as an MP3 file in a temporary directory, and returns the file path.

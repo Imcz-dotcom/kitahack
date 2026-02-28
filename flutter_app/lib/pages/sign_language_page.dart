@@ -154,22 +154,50 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
 
         final dynamic postResult = data['post_result'];
         if (postResult is Map) {
-          final action = (postResult['action'] ?? '').toString();
+          final action = (postResult['action'] ?? '').toString().toLowerCase();
 
           if (action == 'space') {
-            setState(() => _textBuffer = (postResult['text'] ?? _textBuffer).toString());
+            setState(
+              () => _textBuffer = (postResult['text'] ?? _textBuffer).toString(),
+            );
           }
 
-          if (action == 'send' && postResult['success'] == true) {
+          if (action == 'send' || action == 'done') {
+            final sendSuccess = postResult['success'] == true;
             final audioUrl = (postResult['audioUrl'] ?? '').toString();
             final postedText = (postResult['text'] ?? '').toString();
+            var playbackStarted = false;
 
-            if (audioUrl.isNotEmpty && audioUrl != _lastPlayedAudioUrl) {
+            if (sendSuccess &&
+                audioUrl.isNotEmpty &&
+                audioUrl != _lastPlayedAudioUrl) {
               _lastPlayedAudioUrl = audioUrl;
-              await _playAudio(audioUrl);
+              playbackStarted = await _playAudio(audioUrl);
             }
 
             if (!_navigating && postedText.isNotEmpty) {
+              if ((!sendSuccess || audioUrl.isEmpty) && mounted) {
+                final err = (postResult['error'] ?? 'Audio generation failed.')
+                    .toString();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Message captured. $err'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+                return;
+              }
+
+              if (sendSuccess && !playbackStarted && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Audio was generated, but browser playback was blocked.',
+                    ),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
               _navigateToSpeechToText(postedText);
             }
           }
@@ -189,22 +217,24 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
     setState(() => _isProcessing = false);
   }
 
-  Future<void> _playAudio(String audioUrl) async {
+  Future<bool> _playAudio(String audioUrl) async {
     try {
       _activeAudio = html.AudioElement(audioUrl)
         ..autoplay = true
         ..controls = false
         ..volume = 1.0;
       await _activeAudio!.play();
+      return true;
     } catch (e) {
       debugPrint('Audio playback failed: $e');
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Audio generated, but browser blocked autoplay.'),
           duration: Duration(seconds: 2),
         ),
       );
+      return false;
     }
   }
 
@@ -277,11 +307,35 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
     });
   }
 
-  void _clearWords() {
+  Future<void> _clearWords() async {
     setState(() {
       _detectedWords.clear();
       _textBuffer = '';
     });
+
+    try {
+      final response = await http
+          .post(Uri.parse('$_serverUrl/clear-buffer'))
+          .timeout(const Duration(seconds: 2));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (!mounted) return;
+        setState(() {
+          _textBuffer = (data['text_buffer'] ?? '').toString();
+        });
+      } else {
+        throw Exception('Failed to clear server buffer');
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not clear server buffer. Please try again.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   @override
@@ -596,9 +650,14 @@ class _SignLanguagePageState extends State<SignLanguagePage> {
             ),
           ),
           if (_textBuffer.isNotEmpty)
-            GestureDetector(
-              onTap: _clearWords,
-              child: Icon(Icons.close, color: Colors.grey.shade400, size: 18),
+            IconButton(
+              onPressed: _clearWords,
+              tooltip: 'Delete text',
+              icon: Icon(
+                Icons.delete_outline,
+                color: Colors.grey.shade400,
+                size: 20,
+              ),
             ),
         ],
       ),
